@@ -510,10 +510,9 @@ body {
   margin: 0 auto;
 }
 
+/* Let Chart.js control canvas dimensions — do NOT override width/height here */
 .chart-wrap canvas {
   display: block;
-  width: 100% !important;
-  height: auto !important;
 }
 
 #chartEmpty { padding: 1.5rem; }
