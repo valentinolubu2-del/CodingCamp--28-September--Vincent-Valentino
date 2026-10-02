@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Finance Tracker</title>
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <!-- ===== HEADER ===== -->
+    <header class="header">
+      <div class="header__inner">
+        <h1 class="header__logo">💰 Finance Tracker</h1>
+        <div class="header__controls">
+          <!-- Month filter (Optional Challenge: Monthly Summary) -->
+          <div class="month-filter">
+            <label for="monthSelect" class="sr-only">Select Month</label>
+            <input
+              type="month"
+              id="monthSelect"
+              class="month-input"
+              title="Filter by month"
+            />
+            <button id="clearMonth" class="btn btn--ghost btn--sm" title="Show all transactions">All</button>
+          </div>
+          <!-- Dark / Light toggle (Optional Challenge: Dark/Light Mode) -->
+          <button id="themeToggle" class="theme-toggle" aria-label="Toggle dark mode">
+            <span class="theme-toggle__icon">🌙</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+
+      <!-- ===== SUMMARY CARDS ===== -->
+      <section class="summary" aria-label="Financial summary">
+        <div class="card card--balance">
+          <p class="card__label">Total Balance</p>
+          <p class="card__value" id="totalBalance">$0.00</p>
+        </div>
+        <div class="card card--income">
+          <p class="card__label">Total Income</p>
+          <p class="card__value" id="totalIncome">$0.00</p>
+        </div>
+        <div class="card card--expense">
+          <p class="card__label">Total Expenses</p>
+          <p class="card__value" id="totalExpense">$0.00</p>
+        </div>
+      </section>
+
+      <!-- ===== SPENDING LIMIT ALERT (Optional Challenge: Highlight over limit) ===== -->
+      <div id="limitAlert" class="limit-alert hidden" role="alert">
+        ⚠️ You have exceeded your monthly spending limit of <strong id="limitAlertAmount"></strong>!
+      </div>
+
+      <!-- ===== MAIN GRID ===== -->
+      <div class="grid">
+
+        <!-- LEFT: Add Transaction Form -->
+        <section class="panel" aria-labelledby="formHeading">
+          <h2 id="formHeading" class="panel__title">Add Transaction</h2>
+
+          <form id="transactionForm" novalidate>
+            <div class="form-group">
+              <label for="description">Description</label>
+              <input
+                type="text"
+                id="description"
+                placeholder="e.g. Grocery shopping"
+                autocomplete="off"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="amount">Amount ($)</label>
+              <input
+                type="number"
+                id="amount"
+                placeholder="0.00"
+                min="0.01"
+                step="0.01"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="type">Type</label>
+              <select id="type">
+                <option value="income">Income</option>
+                <option value="expense">Expense</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="category">Category</label>
+              <div class="category-row">
+                <select id="category"></select>
+                <!-- Optional Challenge: Custom Categories -->
+                <button type="button" id="manageCategoriesBtn" class="btn btn--ghost btn--sm" title="Manage categories">
+                  ⚙️
+                </button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="date">Date</label>
+              <input type="date" id="date" required />
+            </div>
+
+            <button type="submit" class="btn btn--primary btn--full">
+              + Add Transaction
+            </button>
+
+            <p id="formError" class="form-error hidden"></p>
+          </form>
+        </section>
+
+        <!-- RIGHT: Transaction List + Filters -->
+        <section class="panel" aria-labelledby="listHeading">
+          <div class="list-header">
+            <h2 id="listHeading" class="panel__title">Transactions</h2>
+            <div class="list-controls">
+              <!-- Optional Challenge: Sort by amount / category -->
+              <select id="sortSelect" class="sort-select" title="Sort transactions">
+                <option value="date-desc">Newest first</option>
+                <option value="date-asc">Oldest first</option>
+                <option value="amount-desc">Amount ↓</option>
+                <option value="amount-asc">Amount ↑</option>
+                <option value="category">Category</option>
+              </select>
+              <button id="clearAllBtn" class="btn btn--danger btn--sm">Clear All</button>
+            </div>
+          </div>
+
+          <!-- Filter bar -->
+          <div class="filter-bar">
+            <button class="filter-btn active" data-filter="all">All</button>
+            <button class="filter-btn" data-filter="income">Income</button>
+            <button class="filter-btn" data-filter="expense">Expense</button>
+          </div>
+
+          <ul id="transactionList" class="transaction-list" aria-live="polite">
+            <!-- populated by JS -->
+          </ul>
+
+          <p id="emptyState" class="empty-state">No transactions yet. Add one above!</p>
+        </section>
+
+      </div><!-- /.grid -->
+
+      <!-- ===== MONTHLY SUMMARY (Optional Challenge) ===== -->
+      <section class="panel monthly-summary" aria-labelledby="summaryHeading" id="monthlySummarySection">
+        <h2 id="summaryHeading" class="panel__title">Monthly Summary</h2>
+        <div id="monthlyBreakdown" class="monthly-breakdown">
+          <!-- populated by JS -->
+        </div>
+      </section>
+
+    </main><!-- /.container -->
+
+    <!-- ===== MANAGE CATEGORIES MODAL (Optional Challenge) ===== -->
+    <div id="categoryModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal__backdrop"></div>
+      <div class="modal__box">
+        <div class="modal__header">
+          <h3 id="modalTitle">Manage Categories</h3>
+          <button id="closeModal" class="modal__close" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal__body">
+          <div class="modal-add-row">
+            <input type="text" id="newCategoryInput" placeholder="New category name" maxlength="30" />
+            <button id="addCategoryBtn" class="btn btn--primary btn--sm">Add</button>
+          </div>
+          <ul id="categoryList" class="category-list">
+            <!-- populated by JS -->
+          </ul>
+          <p id="categoryError" class="form-error hidden"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== SPENDING LIMIT MODAL ===== -->
+    <div id="limitModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="limitModalTitle">
+      <div class="modal__backdrop"></div>
+      <div class="modal__box modal__box--sm">
+        <div class="modal__header">
+          <h3 id="limitModalTitle">Set Spending Limit</h3>
+          <button id="closeLimitModal" class="modal__close" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal__body">
+          <div class="form-group">
+            <label for="limitInput">Monthly Spending Limit ($)</label>
+            <input type="number" id="limitInput" placeholder="e.g. 1000" min="0" step="1" />
+          </div>
+          <div class="modal__actions">
+            <button id="saveLimitBtn" class="btn btn--primary">Save Limit</button>
+            <button id="removeLimitBtn" class="btn btn--ghost">Remove Limit</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Spending limit trigger button (subtle, in footer) -->
+    <footer class="footer">
+      <button id="setLimitBtn" class="btn btn--ghost btn--sm">⚡ Set Spending Limit</button>
+      <p class="footer__text">Data stored locally in your browser · Finance Tracker</p>
+    </footer>
+
+    <script src="js/app.js"></script>
+  </body>
+</html>
