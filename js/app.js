@@ -1,55 +1,44 @@
 /**
  * Finance Tracker — app.js
  *
- * Core features:
- *  - Add & delete transactions
- *  - Categories (built-in + custom)
- *  - LocalStorage persistence
- *  - Filter (all / income / expense)
- *  - Live balance / income / expense totals
+ * Required features:
+ *  ✅ Input form: Item Name, Amount, Category (Food / Transport / Fun)
+ *  ✅ Validation: all fields must be filled
+ *  ✅ Transaction list: scrollable, shows name + amount + category, delete button
+ *  ✅ Total balance: displayed at top, auto-updates
+ *  ✅ Pie chart: spending distribution by category via Chart.js, auto-updates
  *
- * Optional Challenges implemented (3/5):
- *  1. Custom categories       — add & remove via modal
- *  2. Monthly summary view    — breakdown cards per calendar month
- *  3. Dark / light mode toggle — persisted in localStorage
+ * Optional challenges (3/5):
+ *  ✅ Custom categories — add/remove via ⚙️ modal
+ *  ✅ Monthly summary view — per-month breakdown cards
+ *  ✅ Dark / light mode toggle — persisted in localStorage
  *
  * Bonus:
- *  - Sort by date / amount / category
- *  - Filter by month
- *  - Highlight spending over a set limit (4th challenge)
+ *  ✅ Sort by date / amount / category
+ *  ✅ Filter by month
+ *  ✅ Highlight spending over a monthly limit
  */
 
 'use strict';
 
 /* ============================================================
-   CONSTANTS & STORAGE KEYS
+   CONSTANTS
    ============================================================ */
-const STORAGE_KEYS = {
+const STORAGE = {
   TRANSACTIONS: 'ft_transactions',
   CATEGORIES:   'ft_categories',
   THEME:        'ft_theme',
   LIMIT:        'ft_spending_limit',
 };
 
-const DEFAULT_CATEGORIES = [
-  'Food & Drink',
-  'Transport',
-  'Housing',
-  'Healthcare',
-  'Shopping',
-  'Entertainment',
-  'Education',
-  'Utilities',
-  'Salary',
-  'Freelance',
-  'Investment',
-  'Other',
-];
+/** The three required built-in categories */
+const BUILTIN_CATEGORIES = ['Food', 'Transport', 'Fun'];
 
-// Emoji map for category icons (fallback: 💵)
-const CATEGORY_ICONS = {
-  'Food & Drink':  '🍔',
+/** Emoji icons — built-ins + common extras */
+const ICONS = {
+  'Food':          '🍔',
   'Transport':     '🚗',
+  'Fun':           '🎉',
   'Housing':       '🏠',
   'Healthcare':    '💊',
   'Shopping':      '🛍️',
@@ -62,150 +51,171 @@ const CATEGORY_ICONS = {
   'Other':         '📌',
 };
 
+/** Colour palette for pie chart slices */
+const CHART_COLOURS = [
+  '#4f46e5', '#10b981', '#f59e0b', '#ef4444',
+  '#8b5cf6', '#06b6d4', '#f97316', '#84cc16',
+  '#ec4899', '#14b8a6', '#a78bfa', '#fb923c',
+];
+
 /* ============================================================
    STATE
    ============================================================ */
 let state = {
-  transactions:  [],   // { id, description, amount, type, category, date }
-  categories:    [],   // string[]
+  transactions:  [],    // { id, name, amount, type, category, date }
+  categories:    [],    // string[]
   theme:         'light',
-  spendingLimit: null, // number | null  (monthly expense limit in $)
-  filter:        'all',        // 'all' | 'income' | 'expense'
-  sort:          'date-desc',  // sort key
-  monthFilter:   '',           // 'YYYY-MM' | ''
+  spendingLimit: null,  // number | null
+  filter:        'all', // 'all' | 'income' | 'expense'
+  sort:          'date-desc',
+  monthFilter:   '',
+};
+
+let pieChart = null; // Chart.js instance
+
+/* ============================================================
+   PERSISTENCE
+   ============================================================ */
+function loadState() {
+  const tx  = localStorage.getItem(STORAGE.TRANSACTIONS);
+  const cat = localStorage.getItem(STORAGE.CATEGORIES);
+  const lim = localStorage.getItem(STORAGE.LIMIT);
+
+  state.transactions  = tx  ? JSON.parse(tx)  : [];
+  state.categories    = cat ? JSON.parse(cat) : [...BUILTIN_CATEGORIES];
+  state.theme         = localStorage.getItem(STORAGE.THEME) || 'light';
+  state.spendingLimit = lim ? parseFloat(lim) : null;
+}
+
+const save = {
+  transactions: () => localStorage.setItem(STORAGE.TRANSACTIONS, JSON.stringify(state.transactions)),
+  categories:   () => localStorage.setItem(STORAGE.CATEGORIES,   JSON.stringify(state.categories)),
+  theme:        () => localStorage.setItem(STORAGE.THEME, state.theme),
+  limit:        () => {
+    if (state.spendingLimit !== null) {
+      localStorage.setItem(STORAGE.LIMIT, String(state.spendingLimit));
+    } else {
+      localStorage.removeItem(STORAGE.LIMIT);
+    }
+  },
 };
 
 /* ============================================================
-   PERSISTENCE HELPERS
+   DOM CACHE
    ============================================================ */
-function loadState() {
-  const raw = {
-    transactions: localStorage.getItem(STORAGE_KEYS.TRANSACTIONS),
-    categories:   localStorage.getItem(STORAGE_KEYS.CATEGORIES),
-    theme:        localStorage.getItem(STORAGE_KEYS.THEME),
-    limit:        localStorage.getItem(STORAGE_KEYS.LIMIT),
-  };
+const $id = id => document.getElementById(id);
+const $qs = sel => document.querySelector(sel);
 
-  state.transactions = raw.transactions ? JSON.parse(raw.transactions) : [];
-  state.categories   = raw.categories   ? JSON.parse(raw.categories)   : [...DEFAULT_CATEGORIES];
-  state.theme        = raw.theme || 'light';
-  state.spendingLimit = raw.limit ? parseFloat(raw.limit) : null;
-}
-
-function saveTransactions() {
-  localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(state.transactions));
-}
-
-function saveCategories() {
-  localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(state.categories));
-}
-
-function saveTheme() {
-  localStorage.setItem(STORAGE_KEYS.THEME, state.theme);
-}
-
-function saveLimit() {
-  if (state.spendingLimit !== null) {
-    localStorage.setItem(STORAGE_KEYS.LIMIT, String(state.spendingLimit));
-  } else {
-    localStorage.removeItem(STORAGE_KEYS.LIMIT);
-  }
-}
-
-/* ============================================================
-   DOM REFERENCES
-   ============================================================ */
 const dom = {
-  // Totals
-  totalBalance: document.getElementById('totalBalance'),
-  totalIncome:  document.getElementById('totalIncome'),
-  totalExpense: document.getElementById('totalExpense'),
+  // Balance banner
+  totalBalance: $id('totalBalance'),
+  totalIncome:  $id('totalIncome'),
+  totalExpense: $id('totalExpense'),
 
-  // Form
-  form:        document.getElementById('transactionForm'),
-  description: document.getElementById('description'),
-  amount:      document.getElementById('amount'),
-  type:        document.getElementById('type'),
-  category:    document.getElementById('category'),
-  date:        document.getElementById('date'),
-  formError:   document.getElementById('formError'),
+  // Form fields
+  form:        $id('transactionForm'),
+  itemName:    $id('itemName'),
+  amount:      $id('amount'),
+  type:        $id('type'),
+  category:    $id('category'),
+  date:        $id('date'),
 
-  // List
-  list:        document.getElementById('transactionList'),
-  emptyState:  document.getElementById('emptyState'),
-  sortSelect:  document.getElementById('sortSelect'),
-  clearAllBtn: document.getElementById('clearAllBtn'),
+  // Field-level error spans
+  nameError:   $id('nameError'),
+  amountError: $id('amountError'),
+  dateError:   $id('dateError'),
+
+  // Transaction list
+  list:        $id('transactionList'),
+  emptyState:  $id('emptyState'),
+  sortSelect:  $id('sortSelect'),
+  clearAllBtn: $id('clearAllBtn'),
   filterBtns:  document.querySelectorAll('.filter-btn'),
 
   // Month filter
-  monthSelect:   document.getElementById('monthSelect'),
-  clearMonth:    document.getElementById('clearMonth'),
+  monthSelect: $id('monthSelect'),
+  clearMonth:  $id('clearMonth'),
 
-  // Summary cards
-  limitAlert:       document.getElementById('limitAlert'),
-  limitAlertAmount: document.getElementById('limitAlertAmount'),
+  // Limit alert
+  limitAlert:       $id('limitAlert'),
+  limitAlertAmount: $id('limitAlertAmount'),
+
+  // Chart
+  spendingChart: $id('spendingChart'),
+  chartEmpty:    $id('chartEmpty'),
 
   // Monthly summary
-  monthlyBreakdown: document.getElementById('monthlyBreakdown'),
+  monthlyBreakdown: $id('monthlyBreakdown'),
+  monthlyEmpty:     $id('monthlyEmpty'),
 
   // Theme
-  themeToggle: document.getElementById('themeToggle'),
-  themeIcon:   document.querySelector('.theme-toggle__icon'),
+  themeToggle: $id('themeToggle'),
+  themeIcon:   $qs('.theme-toggle__icon'),
 
   // Category modal
-  manageCategoriesBtn: document.getElementById('manageCategoriesBtn'),
-  categoryModal:       document.getElementById('categoryModal'),
-  closeModal:          document.getElementById('closeModal'),
-  categoryModalBd:     document.querySelector('#categoryModal .modal__backdrop'),
-  newCategoryInput:    document.getElementById('newCategoryInput'),
-  addCategoryBtn:      document.getElementById('addCategoryBtn'),
-  categoryList:        document.getElementById('categoryList'),
-  categoryError:       document.getElementById('categoryError'),
+  manageCategoriesBtn: $id('manageCategoriesBtn'),
+  categoryModal:       $id('categoryModal'),
+  closeModal:          $id('closeModal'),
+  catModalBd:          $qs('#categoryModal .modal__backdrop'),
+  newCategoryInput:    $id('newCategoryInput'),
+  addCategoryBtn:      $id('addCategoryBtn'),
+  categoryList:        $id('categoryList'),
+  categoryError:       $id('categoryError'),
 
-  // Spending limit modal
-  setLimitBtn:      document.getElementById('setLimitBtn'),
-  limitModal:       document.getElementById('limitModal'),
-  closeLimitModal:  document.getElementById('closeLimitModal'),
-  limitModalBd:     document.querySelector('#limitModal .modal__backdrop'),
-  limitInput:       document.getElementById('limitInput'),
-  saveLimitBtn:     document.getElementById('saveLimitBtn'),
-  removeLimitBtn:   document.getElementById('removeLimitBtn'),
+  // Limit modal
+  setLimitBtn:      $id('setLimitBtn'),
+  limitModal:       $id('limitModal'),
+  closeLimitModal:  $id('closeLimitModal'),
+  limitModalBd:     $qs('#limitModal .modal__backdrop'),
+  limitInput:       $id('limitInput'),
+  saveLimitBtn:     $id('saveLimitBtn'),
+  removeLimitBtn:   $id('removeLimitBtn'),
 };
 
 /* ============================================================
    HELPERS
    ============================================================ */
-function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-function formatCurrency(amount) {
+function fmt(amount) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 }
 
-function formatDate(dateStr) {
-  // dateStr is 'YYYY-MM-DD'
+function fmtDate(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
-  const date = new Date(y, m - 1, d);
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+  });
 }
 
-function formatMonth(ym) {
-  // 'YYYY-MM' → 'October 2025'
+function fmtMonth(ym) {
   const [y, m] = ym.split('-').map(Number);
-  const date = new Date(y, m - 1, 1);
-  return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  return new Date(y, m - 1, 1).toLocaleDateString('en-US', {
+    month: 'long', year: 'numeric',
+  });
 }
 
-function getCategoryIcon(category) {
-  return CATEGORY_ICONS[category] || '💵';
+function icon(category) {
+  return ICONS[category] || '💵';
 }
 
-function getCurrentYearMonth() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  return `${y}-${m}`;
+function todayStr() {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`;
+}
+
+function currentYM() {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`;
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+    .replace(/'/g,'&#x27;');
 }
 
 /* ============================================================
@@ -214,92 +224,99 @@ function getCurrentYearMonth() {
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
   dom.themeIcon.textContent = theme === 'dark' ? '☀️' : '🌙';
+  // Refresh chart colours when theme switches
+  if (pieChart) updateChart();
 }
 
 function toggleTheme() {
   state.theme = state.theme === 'light' ? 'dark' : 'light';
   applyTheme(state.theme);
-  saveTheme();
+  save.theme();
 }
 
 /* ============================================================
    CATEGORIES  (Optional Challenge #1)
    ============================================================ */
-function populateCategorySelect() {
-  const current = dom.category.value;
+function buildCategorySelect() {
+  const prev = dom.category.value;
   dom.category.innerHTML = '';
   state.categories.forEach(cat => {
     const opt = document.createElement('option');
     opt.value = cat;
-    opt.textContent = `${getCategoryIcon(cat)}  ${cat}`;
+    opt.textContent = `${icon(cat)}  ${cat}`;
     dom.category.appendChild(opt);
   });
-  // Restore selection if still valid
-  if (state.categories.includes(current)) {
-    dom.category.value = current;
-  }
+  if (state.categories.includes(prev)) dom.category.value = prev;
 }
 
-function renderCategoryList() {
+function renderCategoryModal() {
   dom.categoryList.innerHTML = '';
   state.categories.forEach(cat => {
+    const isBuiltin = BUILTIN_CATEGORIES.includes(cat);
     const li = document.createElement('li');
-    const isDefault = DEFAULT_CATEGORIES.includes(cat);
-    if (isDefault) li.classList.add('is-default');
+    if (isBuiltin) li.classList.add('is-default');
 
-    const nameSpan = document.createElement('span');
-    nameSpan.textContent = `${getCategoryIcon(cat)}  ${cat}`;
+    const span = document.createElement('span');
+    span.textContent = `${icon(cat)}  ${cat}`;
 
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'tx-delete';
-    deleteBtn.title = isDefault ? 'Default category (cannot delete)' : 'Delete category';
-    deleteBtn.textContent = '×';
-    deleteBtn.addEventListener('click', () => deleteCategory(cat));
+    const del = document.createElement('button');
+    del.className = 'tx-delete';
+    del.title = isBuiltin ? 'Built-in category (cannot delete)' : 'Remove category';
+    del.textContent = '×';
+    del.addEventListener('click', () => removeCategory(cat));
 
-    li.appendChild(nameSpan);
-    li.appendChild(deleteBtn);
+    li.append(span, del);
     dom.categoryList.appendChild(li);
   });
 }
 
 function addCategory() {
   const name = dom.newCategoryInput.value.trim();
-  if (!name) {
-    showCategoryError('Please enter a category name.');
-    return;
-  }
+  if (!name) { setCatError('Enter a category name.'); return; }
   if (state.categories.map(c => c.toLowerCase()).includes(name.toLowerCase())) {
-    showCategoryError('Category already exists.');
+    setCatError('Category already exists.');
     return;
   }
   state.categories.push(name);
-  saveCategories();
+  save.categories();
   dom.newCategoryInput.value = '';
-  hideCategoryError();
-  renderCategoryList();
-  populateCategorySelect();
+  clearCatError();
+  renderCategoryModal();
+  buildCategorySelect();
 }
 
-function deleteCategory(cat) {
-  if (DEFAULT_CATEGORIES.includes(cat)) return; // guard
+function removeCategory(cat) {
+  if (BUILTIN_CATEGORIES.includes(cat)) return;
   state.categories = state.categories.filter(c => c !== cat);
-  // Re-assign transactions that used this category to 'Other'
+  // Reassign orphaned transactions to 'Other' (add Other if missing)
+  const fallback = state.categories[0] || 'Other';
+  if (!state.categories.includes('Other') && fallback === 'Other') {
+    state.categories.push('Other');
+  }
   state.transactions = state.transactions.map(tx =>
-    tx.category === cat ? { ...tx, category: 'Other' } : tx
+    tx.category === cat ? { ...tx, category: fallback } : tx
   );
-  saveCategories();
-  saveTransactions();
-  renderCategoryList();
-  populateCategorySelect();
+  save.categories();
+  save.transactions();
+  renderCategoryModal();
+  buildCategorySelect();
   renderAll();
 }
 
-function showCategoryError(msg) {
-  dom.categoryError.textContent = msg;
-  dom.categoryError.classList.remove('hidden');
+function setCatError(msg)  { dom.categoryError.textContent = msg; }
+function clearCatError()   { dom.categoryError.textContent = ''; }
+
+/* ============================================================
+   VALIDATION HELPERS
+   ============================================================ */
+function setFieldError(input, errorEl, msg) {
+  errorEl.textContent = msg;
+  input.classList.add('invalid');
 }
-function hideCategoryError() {
-  dom.categoryError.classList.add('hidden');
+
+function clearFieldError(input, errorEl) {
+  errorEl.textContent = '';
+  input.classList.remove('invalid');
 }
 
 /* ============================================================
@@ -308,82 +325,79 @@ function hideCategoryError() {
 function addTransaction(e) {
   e.preventDefault();
 
-  const description = dom.description.value.trim();
-  const amount      = parseFloat(dom.amount.value);
-  const type        = dom.type.value;
-  const category    = dom.category.value;
-  const date        = dom.date.value;
+  const name     = dom.itemName.value.trim();
+  const amount   = parseFloat(dom.amount.value);
+  const type     = dom.type.value;
+  const category = dom.category.value;
+  const date     = dom.date.value;
 
-  // Validation
-  if (!description) { showFormError('Please enter a description.'); return; }
-  if (isNaN(amount) || amount <= 0) { showFormError('Please enter a valid amount.'); return; }
-  if (!date) { showFormError('Please select a date.'); return; }
+  // --- Validate all fields ---
+  let valid = true;
 
-  const transaction = {
-    id: generateId(),
-    description,
-    amount,
-    type,
-    category,
-    date,
-  };
+  if (!name) {
+    setFieldError(dom.itemName, dom.nameError, 'Item name is required.');
+    valid = false;
+  } else {
+    clearFieldError(dom.itemName, dom.nameError);
+  }
 
-  state.transactions.unshift(transaction);
-  saveTransactions();
-  hideFormError();
+  if (!dom.amount.value || isNaN(amount) || amount <= 0) {
+    setFieldError(dom.amount, dom.amountError, 'Enter a valid amount greater than 0.');
+    valid = false;
+  } else {
+    clearFieldError(dom.amount, dom.amountError);
+  }
+
+  if (!date) {
+    setFieldError(dom.date, dom.dateError, 'Date is required.');
+    valid = false;
+  } else {
+    clearFieldError(dom.date, dom.dateError);
+  }
+
+  if (!valid) return;
+
+  // --- Create & store ---
+  state.transactions.unshift({ id: uid(), name, amount, type, category, date });
+  save.transactions();
+
+  // Reset form
   dom.form.reset();
-  setDefaultDate();
-  populateCategorySelect(); // re-populate after reset
+  dom.date.value = todayStr();
+  buildCategorySelect();
+
   renderAll();
 }
 
 function deleteTransaction(id) {
   state.transactions = state.transactions.filter(tx => tx.id !== id);
-  saveTransactions();
+  save.transactions();
   renderAll();
 }
 
-function clearAllTransactions() {
+function clearAll() {
   if (!state.transactions.length) return;
   if (!confirm('Delete ALL transactions? This cannot be undone.')) return;
   state.transactions = [];
-  saveTransactions();
+  save.transactions();
   renderAll();
 }
 
 /* ============================================================
-   FILTERS & SORT
+   FILTERING & SORTING
    ============================================================ */
-function getFilteredTransactions() {
+function getVisible() {
   let txs = [...state.transactions];
 
-  // Month filter
-  if (state.monthFilter) {
-    txs = txs.filter(tx => tx.date.startsWith(state.monthFilter));
-  }
+  if (state.monthFilter) txs = txs.filter(tx => tx.date.startsWith(state.monthFilter));
+  if (state.filter !== 'all') txs = txs.filter(tx => tx.type === state.filter);
 
-  // Type filter
-  if (state.filter !== 'all') {
-    txs = txs.filter(tx => tx.type === state.filter);
-  }
-
-  // Sort
   switch (state.sort) {
-    case 'date-asc':
-      txs.sort((a, b) => a.date.localeCompare(b.date));
-      break;
-    case 'date-desc':
-      txs.sort((a, b) => b.date.localeCompare(a.date));
-      break;
-    case 'amount-desc':
-      txs.sort((a, b) => b.amount - a.amount);
-      break;
-    case 'amount-asc':
-      txs.sort((a, b) => a.amount - b.amount);
-      break;
-    case 'category':
-      txs.sort((a, b) => a.category.localeCompare(b.category));
-      break;
+    case 'date-asc':     txs.sort((a,b) => a.date.localeCompare(b.date));       break;
+    case 'date-desc':    txs.sort((a,b) => b.date.localeCompare(a.date));       break;
+    case 'amount-desc':  txs.sort((a,b) => b.amount - a.amount);                break;
+    case 'amount-asc':   txs.sort((a,b) => a.amount - b.amount);                break;
+    case 'category':     txs.sort((a,b) => a.category.localeCompare(b.category)); break;
   }
 
   return txs;
@@ -392,30 +406,25 @@ function getFilteredTransactions() {
 /* ============================================================
    TOTALS
    ============================================================ */
-function computeTotals(txs) {
-  const income  = txs.filter(tx => tx.type === 'income').reduce((s, tx) => s + tx.amount, 0);
-  const expense = txs.filter(tx => tx.type === 'expense').reduce((s, tx) => s + tx.amount, 0);
+function totals(txs) {
+  const income  = txs.filter(t => t.type === 'income').reduce((s,t)  => s + t.amount, 0);
+  const expense = txs.filter(t => t.type === 'expense').reduce((s,t) => s + t.amount, 0);
   return { income, expense, balance: income - expense };
 }
 
 /* ============================================================
-   SPENDING LIMIT  (Bonus challenge)
+   SPENDING LIMIT
    ============================================================ */
-function getCurrentMonthExpenses() {
-  const ym = getCurrentYearMonth();
+function thisMonthExpenses() {
   return state.transactions
-    .filter(tx => tx.type === 'expense' && tx.date.startsWith(ym))
+    .filter(tx => tx.type === 'expense' && tx.date.startsWith(currentYM()))
     .reduce((s, tx) => s + tx.amount, 0);
 }
 
-function checkSpendingLimit() {
-  if (state.spendingLimit === null) {
-    dom.limitAlert.classList.add('hidden');
-    return;
-  }
-  const monthlyExpense = getCurrentMonthExpenses();
-  if (monthlyExpense > state.spendingLimit) {
-    dom.limitAlertAmount.textContent = formatCurrency(state.spendingLimit);
+function checkLimit() {
+  if (state.spendingLimit === null) { dom.limitAlert.classList.add('hidden'); return; }
+  if (thisMonthExpenses() > state.spendingLimit) {
+    dom.limitAlertAmount.textContent = fmt(state.spendingLimit);
     dom.limitAlert.classList.remove('hidden');
   } else {
     dom.limitAlert.classList.add('hidden');
@@ -423,9 +432,19 @@ function checkSpendingLimit() {
 }
 
 /* ============================================================
+   RENDER — Balance Banner
+   ============================================================ */
+function renderBanner(txs) {
+  const { income, expense, balance } = totals(txs);
+  dom.totalBalance.textContent = fmt(balance);
+  dom.totalIncome.textContent  = fmt(income);
+  dom.totalExpense.textContent = fmt(expense);
+}
+
+/* ============================================================
    RENDER — Transaction List
    ============================================================ */
-function renderTransactionList(txs) {
+function renderList(txs) {
   dom.list.innerHTML = '';
 
   if (!txs.length) {
@@ -434,36 +453,28 @@ function renderTransactionList(txs) {
   }
   dom.emptyState.classList.add('hidden');
 
-  // For per-item limit highlighting: track cumulative expense per month
-  // We highlight individual expense items only if the running total for that
-  // month has exceeded the limit at the time of that transaction.
-  // Simpler approach: highlight all expense items in the current month
-  // once the monthly limit is exceeded.
-  const currentMonthExpense = getCurrentMonthExpenses();
-  const limitExceeded = state.spendingLimit !== null && currentMonthExpense > state.spendingLimit;
+  const limitExceeded = state.spendingLimit !== null && thisMonthExpenses() > state.spendingLimit;
+  const ym = currentYM();
 
   txs.forEach(tx => {
     const li = document.createElement('li');
     li.className = 'transaction-item';
-    li.dataset.id = tx.id;
 
-    // Highlight expense items in current month when over limit
-    const isCurrentMonth = tx.date.startsWith(getCurrentYearMonth());
-    if (limitExceeded && tx.type === 'expense' && isCurrentMonth) {
+    if (limitExceeded && tx.type === 'expense' && tx.date.startsWith(ym)) {
       li.classList.add('over-limit');
     }
 
-    const sign   = tx.type === 'income' ? '+' : '−';
-    const cls    = `tx-amount--${tx.type}`;
+    const sign = tx.type === 'income' ? '+' : '−';
+    const cls  = `tx-amount--${tx.type}`;
 
     li.innerHTML = `
-      <div class="tx-icon">${getCategoryIcon(tx.category)}</div>
+      <div class="tx-icon">${icon(tx.category)}</div>
       <div class="tx-info">
-        <div class="tx-description">${escapeHtml(tx.description)}</div>
-        <div class="tx-meta">${escapeHtml(tx.category)} · ${formatDate(tx.date)}</div>
+        <div class="tx-name">${escHtml(tx.name)}</div>
+        <div class="tx-meta">${escHtml(tx.category)} · ${fmtDate(tx.date)}</div>
       </div>
-      <span class="tx-amount ${cls}">${sign}${formatCurrency(tx.amount)}</span>
-      <button class="tx-delete" title="Delete transaction" aria-label="Delete ${escapeHtml(tx.description)}">×</button>
+      <span class="tx-amount ${cls}">${sign}${fmt(tx.amount)}</span>
+      <button class="tx-delete" title="Delete" aria-label="Delete ${escHtml(tx.name)}">×</button>
     `;
 
     li.querySelector('.tx-delete').addEventListener('click', () => deleteTransaction(tx.id));
@@ -472,135 +483,169 @@ function renderTransactionList(txs) {
 }
 
 /* ============================================================
-   RENDER — Summary Cards
+   RENDER — Pie Chart  (Required)
+   Chart shows expense distribution by category.
+   Automatically updates whenever data changes.
    ============================================================ */
-function renderSummaryCards(txs) {
-  // Totals based on currently visible (filtered) transactions
-  const { income, expense, balance } = computeTotals(txs);
-  dom.totalBalance.textContent = formatCurrency(balance);
-  dom.totalIncome.textContent  = formatCurrency(income);
-  dom.totalExpense.textContent = formatCurrency(expense);
+function updateChart() {
+  // Only count expenses; filter by active month if set
+  let expenses = state.transactions.filter(tx => tx.type === 'expense');
+  if (state.monthFilter) expenses = expenses.filter(tx => tx.date.startsWith(state.monthFilter));
+
+  // Group by category
+  const catTotals = {};
+  expenses.forEach(tx => {
+    catTotals[tx.category] = (catTotals[tx.category] || 0) + tx.amount;
+  });
+
+  const labels = Object.keys(catTotals);
+  const data   = labels.map(l => catTotals[l]);
+
+  if (!labels.length) {
+    // No expense data — destroy chart and show placeholder
+    if (pieChart) { pieChart.destroy(); pieChart = null; }
+    dom.spendingChart.classList.add('hidden');
+    dom.chartEmpty.classList.remove('hidden');
+    return;
+  }
+
+  dom.chartEmpty.classList.add('hidden');
+  dom.spendingChart.classList.remove('hidden');
+
+  // Detect dark mode for text colour
+  const isDark   = document.documentElement.getAttribute('data-theme') === 'dark';
+  const textClr  = isDark ? '#e8eaf0' : '#1a1d23';
+  const mutedClr = isDark ? '#9ca3af' : '#6b7280';
+
+  const colours = labels.map((_, i) => CHART_COLOURS[i % CHART_COLOURS.length]);
+
+  if (pieChart) {
+    // Update existing chart in place (no flicker)
+    pieChart.data.labels         = labels;
+    pieChart.data.datasets[0].data            = data;
+    pieChart.data.datasets[0].backgroundColor = colours;
+    pieChart.options.plugins.legend.labels.color = textClr;
+    pieChart.update();
+    return;
+  }
+
+  // Create fresh chart
+  pieChart = new Chart(dom.spendingChart, {
+    type: 'pie',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        backgroundColor: colours,
+        borderWidth: 2,
+        borderColor: isDark ? '#1c1f2a' : '#ffffff',
+        hoverOffset: 8,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      animation: { duration: 400 },
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            color: textClr,
+            font: { family: "'Segoe UI', system-ui, sans-serif", size: 12, weight: '600' },
+            padding: 14,
+            usePointStyle: true,
+            pointStyleWidth: 10,
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label(ctx) {
+              const val = ctx.parsed;
+              const sum = ctx.dataset.data.reduce((a, b) => a + b, 0);
+              const pct = ((val / sum) * 100).toFixed(1);
+              return `  ${fmt(val)}  (${pct}%)`;
+            },
+          },
+          bodyFont: { family: "'Segoe UI', system-ui, sans-serif", size: 13 },
+          titleFont: { family: "'Segoe UI', system-ui, sans-serif", size: 13, weight: '700' },
+        },
+      },
+    },
+  });
 }
 
 /* ============================================================
    RENDER — Monthly Summary  (Optional Challenge #2)
    ============================================================ */
 function renderMonthlySummary() {
-  // Group all transactions by YYYY-MM
-  const monthMap = {};
-
+  // Group all transactions (unfiltered) by YYYY-MM
+  const map = {};
   state.transactions.forEach(tx => {
-    const ym = tx.date.slice(0, 7); // 'YYYY-MM'
-    if (!monthMap[ym]) monthMap[ym] = { income: 0, expense: 0 };
-    if (tx.type === 'income')  monthMap[ym].income  += tx.amount;
-    if (tx.type === 'expense') monthMap[ym].expense += tx.amount;
+    const ym = tx.date.slice(0, 7);
+    if (!map[ym]) map[ym] = { income: 0, expense: 0 };
+    map[ym][tx.type] += tx.amount;
   });
 
-  const months = Object.keys(monthMap).sort((a, b) => b.localeCompare(a)); // newest first
+  const months = Object.keys(map).sort((a, b) => b.localeCompare(a));
 
   if (!months.length) {
-    dom.monthlyBreakdown.innerHTML = '<p class="empty-state">No data yet.</p>';
+    dom.monthlyBreakdown.innerHTML = '';
+    dom.monthlyEmpty.classList.remove('hidden');
+    dom.monthlyBreakdown.appendChild(dom.monthlyEmpty);
     return;
   }
 
   dom.monthlyBreakdown.innerHTML = '';
-
   months.forEach(ym => {
-    const { income, expense } = monthMap[ym];
-    const balance = income - expense;
+    const { income = 0, expense = 0 } = map[ym];
+    const bal = income - expense;
 
     const card = document.createElement('div');
     card.className = 'month-card';
     card.innerHTML = `
-      <p class="month-card__title">📅 ${formatMonth(ym)}</p>
-      <div class="month-card__row">
-        <span>Income</span>
-        <span class="income">${formatCurrency(income)}</span>
-      </div>
-      <div class="month-card__row">
-        <span>Expenses</span>
-        <span class="expense">${formatCurrency(expense)}</span>
-      </div>
-      <div class="month-card__row">
-        <span>Net Balance</span>
-        <span class="balance">${formatCurrency(balance)}</span>
-      </div>
+      <p class="month-card__title">📅 ${fmtMonth(ym)}</p>
+      <div class="month-card__row"><span>Income</span>  <span class="pos">${fmt(income)}</span></div>
+      <div class="month-card__row"><span>Expenses</span><span class="neg">${fmt(expense)}</span></div>
+      <div class="month-card__row"><span>Balance</span> <span class="bal">${fmt(bal)}</span></div>
     `;
     dom.monthlyBreakdown.appendChild(card);
   });
 }
 
 /* ============================================================
-   RENDER — ALL
+   RENDER ALL
    ============================================================ */
 function renderAll() {
-  const txs = getFilteredTransactions();
-  renderSummaryCards(txs);
-  renderTransactionList(txs);
+  const txs = getVisible();
+  renderBanner(txs);
+  renderList(txs);
+  updateChart();
   renderMonthlySummary();
-  checkSpendingLimit();
-}
-
-/* ============================================================
-   FORM HELPERS
-   ============================================================ */
-function showFormError(msg) {
-  dom.formError.textContent = msg;
-  dom.formError.classList.remove('hidden');
-}
-function hideFormError() {
-  dom.formError.classList.add('hidden');
-}
-
-function setDefaultDate() {
-  const today = new Date();
-  const y = today.getFullYear();
-  const m = String(today.getMonth() + 1).padStart(2, '0');
-  const d = String(today.getDate()).padStart(2, '0');
-  dom.date.value = `${y}-${m}-${d}`;
-}
-
-/* ============================================================
-   SECURITY — HTML ESCAPING
-   ============================================================ */
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;');
+  checkLimit();
 }
 
 /* ============================================================
    MODAL HELPERS
    ============================================================ */
-function openModal(modal) {
-  modal.classList.remove('hidden');
-  document.body.style.overflow = 'hidden';
-}
-
-function closeModal(modal) {
-  modal.classList.add('hidden');
-  document.body.style.overflow = '';
-}
+function openModal(el)  { el.classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
+function closeModal(el) { el.classList.add('hidden');    document.body.style.overflow = ''; }
 
 /* ============================================================
-   EVENT LISTENERS
+   EVENT WIRING
    ============================================================ */
 function bindEvents() {
-  // --- Form submit ---
+  // Form submit
   dom.form.addEventListener('submit', addTransaction);
 
-  // Clear form error on input
-  [dom.description, dom.amount, dom.date].forEach(el => {
-    el.addEventListener('input', hideFormError);
-  });
+  // Live-clear inline errors on input
+  dom.itemName.addEventListener('input', () => clearFieldError(dom.itemName, dom.nameError));
+  dom.amount.addEventListener('input',   () => clearFieldError(dom.amount,   dom.amountError));
+  dom.date.addEventListener('change',    () => clearFieldError(dom.date,     dom.dateError));
 
-  // --- Theme toggle ---
+  // Theme
   dom.themeToggle.addEventListener('click', toggleTheme);
 
-  // --- Filter buttons ---
+  // Type filter
   dom.filterBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       dom.filterBtns.forEach(b => b.classList.remove('active'));
@@ -610,87 +655,63 @@ function bindEvents() {
     });
   });
 
-  // --- Sort ---
-  dom.sortSelect.addEventListener('change', () => {
-    state.sort = dom.sortSelect.value;
-    renderAll();
-  });
+  // Sort
+  dom.sortSelect.addEventListener('change', () => { state.sort = dom.sortSelect.value; renderAll(); });
 
-  // --- Clear all ---
-  dom.clearAllBtn.addEventListener('click', clearAllTransactions);
+  // Clear all
+  dom.clearAllBtn.addEventListener('click', clearAll);
 
-  // --- Month filter ---
-  dom.monthSelect.addEventListener('change', () => {
-    state.monthFilter = dom.monthSelect.value;
-    renderAll();
-  });
-  dom.clearMonth.addEventListener('click', () => {
-    dom.monthSelect.value = '';
-    state.monthFilter = '';
-    renderAll();
-  });
+  // Month filter
+  dom.monthSelect.addEventListener('change', () => { state.monthFilter = dom.monthSelect.value; renderAll(); });
+  dom.clearMonth.addEventListener('click', () => { dom.monthSelect.value = ''; state.monthFilter = ''; renderAll(); });
 
-  // --- Category modal ---
-  dom.manageCategoriesBtn.addEventListener('click', () => {
-    renderCategoryList();
-    hideCategoryError();
-    openModal(dom.categoryModal);
-  });
+  // Category modal
+  dom.manageCategoriesBtn.addEventListener('click', () => { renderCategoryModal(); clearCatError(); openModal(dom.categoryModal); });
   dom.closeModal.addEventListener('click', () => closeModal(dom.categoryModal));
-  dom.categoryModalBd.addEventListener('click', () => closeModal(dom.categoryModal));
-
+  dom.catModalBd.addEventListener('click', () => closeModal(dom.categoryModal));
   dom.addCategoryBtn.addEventListener('click', addCategory);
-  dom.newCategoryInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); addCategory(); }
-  });
+  dom.newCategoryInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addCategory(); } });
 
-  // --- Spending limit modal ---
+  // Spending limit modal
   dom.setLimitBtn.addEventListener('click', () => {
-    dom.limitInput.value = state.spendingLimit !== null ? state.spendingLimit : '';
+    dom.limitInput.value = state.spendingLimit ?? '';
     openModal(dom.limitModal);
   });
   dom.closeLimitModal.addEventListener('click', () => closeModal(dom.limitModal));
   dom.limitModalBd.addEventListener('click', () => closeModal(dom.limitModal));
 
   dom.saveLimitBtn.addEventListener('click', () => {
-    const val = parseFloat(dom.limitInput.value);
-    if (isNaN(val) || val < 0) {
-      alert('Please enter a valid spending limit.');
-      return;
-    }
-    state.spendingLimit = val;
-    saveLimit();
+    const v = parseFloat(dom.limitInput.value);
+    if (isNaN(v) || v < 0) { alert('Enter a valid spending limit.'); return; }
+    state.spendingLimit = v;
+    save.limit();
     closeModal(dom.limitModal);
     renderAll();
   });
 
   dom.removeLimitBtn.addEventListener('click', () => {
     state.spendingLimit = null;
-    saveLimit();
+    save.limit();
     closeModal(dom.limitModal);
     renderAll();
   });
 
-  // --- Close modals on Escape ---
+  // Escape closes modals
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') {
-      closeModal(dom.categoryModal);
-      closeModal(dom.limitModal);
-    }
+    if (e.key === 'Escape') { closeModal(dom.categoryModal); closeModal(dom.limitModal); }
   });
 }
 
 /* ============================================================
-   INITIALISE
+   INIT
    ============================================================ */
 function init() {
   loadState();
   applyTheme(state.theme);
-  setDefaultDate();
-  populateCategorySelect();
+  dom.date.value = todayStr();
+  buildCategorySelect();
   bindEvents();
   renderAll();
 }
 
-// Kick everything off once the DOM is ready
 document.addEventListener('DOMContentLoaded', init);
